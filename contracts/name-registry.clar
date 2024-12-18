@@ -1,30 +1,15 @@
+(define-map names-map (string-ascii 50) principal)
 
-;; title: name-registry
-;; version:
-;; summary:
-;; description:
+(define-public (claim-name (name (string-ascii 50)))
+    (if (is-some (map-get? names-map name))
+        (err u100)
+        (begin
+          (map-set names-map name tx-sender)
+          (ok true)
+        )
+    )
+)
 
-;; traits
-;;
-
-;; token definitions
-;;
-
-;; constants
-;;
-
-;; data vars
-;;
-
-;; data maps
-;;
-
-;; public functions
-;;
-
-;; read only functions
-;;
-
-;; private functions
-;;
-
+(define-read-only (get-owner (name (string-ascii 50)))
+  (map-get? names-map name)
+)
