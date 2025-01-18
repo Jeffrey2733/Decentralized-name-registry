@@ -31,3 +31,17 @@
         )
     )
 )
+
+
+
+(define-public (transfer-name (name (string-ascii 50)) (new-owner principal))
+    (let ((current-owner (get-owner name)))
+        (if (and (is-some current-owner) (is-eq (some tx-sender) current-owner))
+            (begin
+                (map-set names-map name new-owner)
+                (ok true)
+            )
+            (err u101)
+        )
+    )
+)
