@@ -267,3 +267,160 @@
         (ok true)
     )
 )
+(define-public (batch-register-names (names (list 10 (string-ascii 50))))
+    (fold check-and-register names (ok true))
+)
+
+(define-private (check-and-register (name (string-ascii 50)) (previous-result (response bool uint)))
+    (if (is-ok previous-result)
+        (claim-name name)
+        previous-result
+    )
+)
+
+
+(define-map name-watchlist 
+    {user: principal, name: (string-ascii 50)} 
+    {watch-date: uint})
+
+(define-public (watch-name (name (string-ascii 50)))
+    (begin
+        (map-set name-watchlist 
+            {user: tx-sender, name: name}
+            {watch-date: block-height}
+        )
+        (ok true)
+    )
+)
+
+
+(define-map name-ratings
+    {name: (string-ascii 50), rater: principal}
+    {rating: uint, timestamp: uint})
+
+(define-public (rate-name (name (string-ascii 50)) (rating uint))
+    (if (and (>= rating u1) (<= rating u5))
+        (begin
+            (map-set name-ratings
+                {name: name, rater: tx-sender}
+                {rating: rating, timestamp: block-height}
+            )
+            (ok true)
+        )
+        (err u111)
+    )
+)
+
+(define-map name-categories
+    (string-ascii 50)
+    (string-ascii 8))
+
+(define-constant VALID-CATEGORIES (list "personal" "business" "gaming" "social"))
+
+(define-public (set-name-category (name (string-ascii 50)) (category (string-ascii 8)))
+    (let ((current-owner (get-owner name)))
+        (if (and 
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner)
+            (is-some (index-of VALID-CATEGORIES category))
+        )
+            (begin
+                (map-set name-categories name category)
+                (ok true)
+            )
+            (err u112)
+        )
+    )
+)
+
+
+(define-map referrals
+    (string-ascii 50)
+    {referrer: principal, reward: uint})
+
+(define-constant REFERRAL_REWARD u10000)
+
+(define-public (register-with-referral (name (string-ascii 50)) (referrer principal))
+    (begin
+        (try! (claim-name name))
+        (try! (stx-transfer? REFERRAL_REWARD CONTRACT_OWNER referrer))
+        (map-set referrals name {referrer: referrer, reward: REFERRAL_REWARD})
+        (ok true)
+    )
+)
+
+
+(define-map name-bundles
+    (string-ascii 50)
+    {names: (list 10 (string-ascii 50)), price: uint, owner: principal})
+
+(define-public (create-name-bundle (bundle-id (string-ascii 50)) (names (list 10 (string-ascii 50))) (price uint))
+    (begin
+        (map-set name-bundles bundle-id
+            {names: names, price: price, owner: tx-sender}
+        )
+        (ok true)
+    )
+)
+
+
+(define-map name-auctions
+    (string-ascii 50)
+    {
+        highest-bid: uint,
+        highest-bidder: principal,
+        end-block: uint
+    })
+
+(define-public (start-auction (name (string-ascii 50)) (duration uint))
+    (if (is-none (map-get? names-map name))
+        (begin
+            (map-set name-auctions name
+                {
+                    highest-bid: u0,
+                    highest-bidder: tx-sender,
+                    end-block: (+ block-height duration)
+                }
+            )
+            (ok true)
+        )
+        (err u113)
+    )
+)
+
+(define-public (place-bid (name (string-ascii 50)) (bid uint))
+    (let ((auction (map-get? name-auctions name)))
+        (match auction
+            auction-data (if (> bid (get highest-bid auction-data))
+                (begin
+                    (try! (stx-transfer? bid tx-sender CONTRACT_OWNER))
+                    (map-set name-auctions name
+                        {
+                            highest-bid: bid,
+                            highest-bidder: tx-sender,
+                            end-block: (get end-block auction-data)
+                        }
+                    )
+                    (ok true)
+                )
+                (err u114))
+            (err u115)
+        )
+    )
+)
+
+
+(define-public (end-auction (name (string-ascii 50)))
+    (let ((auction (map-get? name-auctions name)))
+        (match auction
+            auction-data (begin
+                (try! (stx-transfer? (get highest-bid auction-data) CONTRACT_OWNER (get highest-bidder auction-data)))
+                (map-set names-map name (get highest-bidder auction-data))
+                (map-delete name-auctions name)
+                (ok true)
+            )
+            (err u116)
+        )
+    )
+)
+
