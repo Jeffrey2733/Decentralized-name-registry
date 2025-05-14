@@ -662,3 +662,137 @@
         )
     )
 )
+
+
+(define-map name-forwards
+    (string-ascii 50)
+    {
+        btc: (optional (string-ascii 50)),
+        eth: (optional (string-ascii 50)),
+        sol: (optional (string-ascii 50)),
+        web: (optional (string-ascii 100))
+    }
+)
+
+(define-public (set-forwards 
+    (name (string-ascii 50))
+    (btc-address (optional (string-ascii 50)))
+    (eth-address (optional (string-ascii 50)))
+    (sol-address (optional (string-ascii 50)))
+    (web-url (optional (string-ascii 100))))
+    (let ((current-owner (get-owner name)))
+        (if (and (is-some current-owner) (is-eq (some tx-sender) current-owner))
+            (begin
+                (map-set name-forwards name
+                    {
+                        btc: btc-address,
+                        eth: eth-address,
+                        sol: sol-address,
+                        web: web-url
+                    })
+                (ok true)
+            )
+            (err u200)
+        )
+    )
+)
+
+(define-read-only (get-forwards (name (string-ascii 50)))
+    (map-get? name-forwards name)
+)
+
+
+(define-constant MAX_BATCH_SIZE u20)
+
+
+
+(define-private (check-and-transfer 
+    (name (string-ascii 50)) 
+    (previous-result (response bool uint))
+    (new-owner principal))
+    (if (is-ok previous-result)
+        (transfer-name name new-owner)
+        previous-result
+    )
+)
+
+
+(define-map name-delegates
+    (string-ascii 50)
+    {delegate: principal, expiry: uint})
+
+(define-constant DELEGATE_MIN_PERIOD u1440)
+(define-constant DELEGATE_MAX_PERIOD u52560)
+
+(define-public (delegate-name (name (string-ascii 50)) (delegate principal) (period uint))
+    (let ((current-owner (get-owner name)))
+        (if (and 
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner)
+            (>= period DELEGATE_MIN_PERIOD)
+            (<= period DELEGATE_MAX_PERIOD))
+            (begin
+                (map-set name-delegates name
+                    {delegate: delegate,
+                     expiry: (+ block-height period)})
+                (ok true)
+            )
+            (err u300)
+        )
+    )
+)
+
+(define-public (revoke-delegation (name (string-ascii 50)))
+    (let ((current-owner (get-owner name)))
+        (if (and 
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner))
+            (begin
+                (map-delete name-delegates name)
+                (ok true)
+            )
+            (err u301)
+        )
+    )
+)
+
+(define-read-only (get-delegate (name (string-ascii 50)))
+    (map-get? name-delegates name)
+)
+
+
+(define-map name-metadata
+    (string-ascii 50)
+    {
+        tags: (list 5 (string-ascii 20)),
+        image-url: (optional (string-ascii 200)),
+        external-url: (optional (string-ascii 200)),
+        updated-at: uint
+    }
+)
+
+(define-public (set-metadata 
+    (name (string-ascii 50))
+    (tags (list 5 (string-ascii 20)))
+    (image-url (optional (string-ascii 200)))
+    (external-url (optional (string-ascii 200))))
+    (let ((current-owner (get-owner name)))
+        (if (and (is-some current-owner) (is-eq (some tx-sender) current-owner))
+            (begin
+                (map-set name-metadata name
+                    {
+                        tags: tags,
+                        image-url: image-url,
+                        external-url: external-url,
+                        updated-at: block-height
+                    })
+                (ok true)
+            )
+            (err u400)
+        )
+    )
+)
+
+(define-read-only (get-metadata (name (string-ascii 50)))
+    (map-get? name-metadata name)
+)
