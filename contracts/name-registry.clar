@@ -796,3 +796,132 @@
 (define-read-only (get-metadata (name (string-ascii 50)))
     (map-get? name-metadata name)
 )
+
+
+(define-map name-escrows
+    uint
+    {
+        name: (string-ascii 50),
+        seller: principal,
+        buyer: principal,
+        amount: uint,
+        expiry: uint,
+        status: (string-ascii 10)
+    }
+)
+
+(define-data-var escrow-counter uint u0)
+(define-constant ESCROW_TIMEOUT u1440)
+
+(define-public (create-escrow 
+    (name (string-ascii 50)) 
+    (buyer principal) 
+    (amount uint) 
+    (timeout-blocks uint))
+    (let ((escrow-id (var-get escrow-counter))
+          (current-owner (get-owner name)))
+        (if (and 
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner)
+            (> amount u0)
+            (> timeout-blocks u0))
+            (begin
+                (map-set name-escrows escrow-id
+                    {
+                        name: name,
+                        seller: tx-sender,
+                        buyer: buyer,
+                        amount: amount,
+                        expiry: (+ block-height timeout-blocks),
+                        status: "active"
+                    })
+                (var-set escrow-counter (+ escrow-id u1))
+                (ok escrow-id)
+            )
+            (err u500)
+        )
+    )
+)
+
+(define-public (fund-escrow (escrow-id uint))
+    (let ((escrow (map-get? name-escrows escrow-id)))
+        (match escrow
+            escrow-data (if (and 
+                (is-eq tx-sender (get buyer escrow-data))
+                (is-eq (get status escrow-data) "active")
+                (< block-height (get expiry escrow-data)))
+                (begin
+                    (try! (stx-transfer? (get amount escrow-data) tx-sender (as-contract tx-sender)))
+                    (map-set name-escrows escrow-id
+                        (merge escrow-data {status: "funded"}))
+                    (ok true)
+                )
+                (err u501))
+            (err u502)
+        )
+    )
+)
+
+(define-public (complete-escrow (escrow-id uint))
+    (let ((escrow (map-get? name-escrows escrow-id)))
+        (match escrow
+            escrow-data (if (and 
+                (is-eq tx-sender (get seller escrow-data))
+                (is-eq (get status escrow-data) "funded")
+                (< block-height (get expiry escrow-data)))
+                (begin
+                    (try! (transfer-name (get name escrow-data) (get buyer escrow-data)))
+                    (try! (as-contract (stx-transfer? (get amount escrow-data) tx-sender (get seller escrow-data))))
+                    (map-set name-escrows escrow-id
+                        (merge escrow-data {status: "completed"}))
+                    (ok true)
+                )
+                (err u503))
+            (err u504)
+        )
+    )
+)
+
+(define-public (cancel-escrow (escrow-id uint))
+    (let ((escrow (map-get? name-escrows escrow-id)))
+        (match escrow
+            escrow-data (if (and 
+                (or (is-eq tx-sender (get seller escrow-data)) (is-eq tx-sender (get buyer escrow-data)))
+                (is-eq (get status escrow-data) "active")
+                (< block-height (get expiry escrow-data)))
+                (begin
+                    (map-set name-escrows escrow-id
+                        (merge escrow-data {status: "cancelled"}))
+                    (ok true)
+                )
+                (err u505))
+            (err u506)
+        )
+    )
+)
+
+(define-public (refund-expired-escrow (escrow-id uint))
+    (let ((escrow (map-get? name-escrows escrow-id)))
+        (match escrow
+            escrow-data (if (and 
+                (is-eq (get status escrow-data) "funded")
+                (>= block-height (get expiry escrow-data)))
+                (begin
+                    (try! (as-contract (stx-transfer? (get amount escrow-data) tx-sender (get buyer escrow-data))))
+                    (map-set name-escrows escrow-id
+                        (merge escrow-data {status: "expired"}))
+                    (ok true)
+                )
+                (err u507))
+            (err u508)
+        )
+    )
+)
+
+(define-read-only (get-escrow (escrow-id uint))
+    (map-get? name-escrows escrow-id)
+)
+
+(define-read-only (get-escrow-count)
+    (var-get escrow-counter)
+)
