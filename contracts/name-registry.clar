@@ -925,3 +925,202 @@
 (define-read-only (get-escrow-count)
     (var-get escrow-counter)
 )
+
+(define-map name-milestones
+    {name: (string-ascii 50), milestone-id: uint}
+    {
+        title: (string-ascii 100),
+        description: (string-ascii 300),
+        target-date: uint,
+        reward-pool: uint,
+        status: (string-ascii 10),
+        votes-for: uint,
+        votes-against: uint,
+        created-at: uint
+    }
+)
+
+(define-map milestone-votes
+    {name: (string-ascii 50), milestone-id: uint, voter: principal}
+    {vote: bool, timestamp: uint}
+)
+
+(define-map name-milestone-counters
+    (string-ascii 50)
+    uint
+)
+
+(define-constant MILESTONE_CREATION_FEE u25000)
+(define-constant MILESTONE_VOTE_FEE u5000)
+(define-constant MIN_VOTES_FOR_COMPLETION u3)
+
+(define-public (create-milestone 
+    (name (string-ascii 50))
+    (title (string-ascii 100))
+    (description (string-ascii 300))
+    (target-date uint)
+    (reward-pool uint))
+    (let ((current-owner (get-owner name))
+          (milestone-counter (default-to u0 (map-get? name-milestone-counters name))))
+        (if (and 
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner)
+            (> target-date block-height)
+            (>= reward-pool MILESTONE_CREATION_FEE))
+            (begin
+                (try! (stx-transfer? MILESTONE_CREATION_FEE tx-sender CONTRACT_OWNER))
+                (map-set name-milestones
+                    {name: name, milestone-id: milestone-counter}
+                    {
+                        title: title,
+                        description: description,
+                        target-date: target-date,
+                        reward-pool: reward-pool,
+                        status: "active",
+                        votes-for: u0,
+                        votes-against: u0,
+                        created-at: block-height
+                    })
+                (map-set name-milestone-counters name (+ milestone-counter u1))
+                (ok milestone-counter)
+            )
+            (err u600)
+        )
+    )
+)
+
+(define-public (vote-on-milestone 
+    (name (string-ascii 50))
+    (milestone-id uint)
+    (vote-for bool))
+    (let ((milestone (map-get? name-milestones {name: name, milestone-id: milestone-id}))
+          (existing-vote (map-get? milestone-votes {name: name, milestone-id: milestone-id, voter: tx-sender})))
+        (if (and 
+            (is-some milestone)
+            (is-none existing-vote)
+            (is-eq (get status (unwrap-panic milestone)) "active"))
+            (begin
+                (try! (stx-transfer? MILESTONE_VOTE_FEE tx-sender CONTRACT_OWNER))
+                (map-set milestone-votes
+                    {name: name, milestone-id: milestone-id, voter: tx-sender}
+                    {vote: vote-for, timestamp: block-height})
+                (let ((current-milestone (unwrap-panic milestone)))
+                    (map-set name-milestones
+                        {name: name, milestone-id: milestone-id}
+                        (if vote-for
+                            (merge current-milestone {votes-for: (+ (get votes-for current-milestone) u1)})
+                            (merge current-milestone {votes-against: (+ (get votes-against current-milestone) u1)}))))
+                (ok true)
+            )
+            (err u601)
+        )
+    )
+)
+
+(define-public (complete-milestone 
+    (name (string-ascii 50))
+    (milestone-id uint))
+    (let ((milestone (map-get? name-milestones {name: name, milestone-id: milestone-id}))
+          (current-owner (get-owner name)))
+        (if (and 
+            (is-some milestone)
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner))
+            (let ((milestone-data (unwrap-panic milestone)))
+                (if (and 
+                    (is-eq (get status milestone-data) "active")
+                    (>= (get votes-for milestone-data) MIN_VOTES_FOR_COMPLETION)
+                    (> (get votes-for milestone-data) (get votes-against milestone-data)))
+                    (begin
+                        (try! (as-contract (stx-transfer? (get reward-pool milestone-data) CONTRACT_OWNER tx-sender)))
+                        (map-set name-milestones
+                            {name: name, milestone-id: milestone-id}
+                            (merge milestone-data {status: "completed"}))
+                        (ok (get reward-pool milestone-data))
+                    )
+                    (err u602)
+                )
+            )
+            (err u603)
+        )
+    )
+)
+
+(define-public (cancel-milestone 
+    (name (string-ascii 50))
+    (milestone-id uint))
+    (let ((milestone (map-get? name-milestones {name: name, milestone-id: milestone-id}))
+          (current-owner (get-owner name)))
+        (if (and 
+            (is-some milestone)
+            (is-some current-owner)
+            (is-eq (some tx-sender) current-owner))
+            (let ((milestone-data (unwrap-panic milestone)))
+                (if (is-eq (get status milestone-data) "active")
+                    (begin
+                        (map-set name-milestones
+                            {name: name, milestone-id: milestone-id}
+                            (merge milestone-data {status: "cancelled"}))
+                        (ok true)
+                    )
+                    (err u604)
+                )
+            )
+            (err u605)
+        )
+    )
+)
+
+(define-public (expire-milestone 
+    (name (string-ascii 50))
+    (milestone-id uint))
+    (let ((milestone (map-get? name-milestones {name: name, milestone-id: milestone-id})))
+        (if (is-some milestone)
+            (let ((milestone-data (unwrap-panic milestone)))
+                (if (and 
+                    (is-eq (get status milestone-data) "active")
+                    (>= block-height (get target-date milestone-data)))
+                    (begin
+                        (map-set name-milestones
+                            {name: name, milestone-id: milestone-id}
+                            (merge milestone-data {status: "expired"}))
+                        (ok true)
+                    )
+                    (err u606)
+                )
+            )
+            (err u607)
+        )
+    )
+)
+
+(define-read-only (get-milestone 
+    (name (string-ascii 50))
+    (milestone-id uint))
+    (map-get? name-milestones {name: name, milestone-id: milestone-id})
+)
+
+(define-read-only (get-milestone-vote
+    (name (string-ascii 50))
+    (milestone-id uint)
+    (voter principal))
+    (map-get? milestone-votes {name: name, milestone-id: milestone-id, voter: voter})
+)
+
+(define-read-only (get-name-milestone-count (name (string-ascii 50)))
+    (default-to u0 (map-get? name-milestone-counters name))
+)
+
+(define-read-only (is-milestone-eligible-for-completion
+    (name (string-ascii 50))
+    (milestone-id uint))
+    (let ((milestone (map-get? name-milestones {name: name, milestone-id: milestone-id})))
+        (match milestone
+            milestone-data (and 
+                (is-eq (get status milestone-data) "active")
+                (>= (get votes-for milestone-data) MIN_VOTES_FOR_COMPLETION)
+                (> (get votes-for milestone-data) (get votes-against milestone-data)))
+            false
+        )
+    )
+)
