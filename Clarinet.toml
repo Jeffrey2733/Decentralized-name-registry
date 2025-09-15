@@ -19,6 +19,11 @@ epoch = 2.5
 path = 'contracts/name-notifications.clar'
 clarity_version = 2
 epoch = 2.5
+
+[contracts.name-collections]
+path = 'contracts/name-collections.clar'
+clarity_version = 2
+epoch = 2.5
 [repl.analysis]
 passes = ['check_checker']
 
