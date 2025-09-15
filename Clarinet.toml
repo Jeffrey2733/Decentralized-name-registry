@@ -9,6 +9,21 @@ requirements = []
 path = 'contracts/name-registry.clar'
 clarity_version = 2
 epoch = 2.5
+
+[contracts.name-reputation]
+path = 'contracts/name-reputation.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.name-notifications]
+path = 'contracts/name-notifications.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.name-collections]
+path = 'contracts/name-collections.clar'
+clarity_version = 2
+epoch = 2.5
 [repl.analysis]
 passes = ['check_checker']
 
